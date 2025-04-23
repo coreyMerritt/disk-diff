@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import sys
+import argparse
 import os
 import subprocess
 import time
@@ -10,7 +10,7 @@ config = {
   "dirs_to_check": ["/"],
   "file_categories": {
     "ignored": [
-      # Empty for now, but is fully implemented
+      "/var/lib/rsyslog/imjournal.state"
     ]
   },
   "dir_categories": {
@@ -21,8 +21,8 @@ config = {
       "/var/lib/docker",  # ~1.2m
       # These directories are ignored because they're cluttery
       "/root/.vscode-server",
-      # These directories are ignored because they can cause throwing via permissions issues
-      "/mnt"
+      "/run/docker/runtime-runc",
+      "/run/log/journal"
     ],
     "unimportant": [
       "/dev",
@@ -39,64 +39,80 @@ config = {
       "/usr/src"
     ],
     "key": [
-      "/etc",
+      "/usr/local",
+      "/var",
+      "/root",
       "/home",
       "/opt",
-      "/root",
+      "/etc",
       "/bin",
       "/sbin",
       "/usr/bin",
       "/usr/sbin",
-      "/usr/local",
-      "/var"
+      "/usr/local/bin",
+      "/usr/local/sbin",
+      "/usr/lib/systemd/system",
     ]
   }
 }
 
 system = {
-  "start_time": time.time(),
-  "log_path": None,
-  "manual_trigger": False,
+  "start_time": float,
+  "end_time": float,
+  "log_path": str,
   "get_files_first_call": True,
-  "files_examined_count": 0,
-  "command_to_execute": [],
+  "files_examined_count": int,
   "uncategorized_files": {
     "born": [],
-    "modified": []
+    "modified": [],
+    "changed": [],
+    "accessed": []
   },
   "categorized_files": {
     "logs": {
       "born": [],
-      "modified": []
+      "modified": [],
+      "changed": [],
+      "accessed": []
     },
     "ignored": {
       "born": [],
-      "modified": []
+      "modified": [],
+      "changed": [],
+      "accessed": []
     },
     "unimportant": {
       "born": [],
-      "modified": []
+      "modified": [],
+      "changed": [],
+      "accessed": []
     },
     "notable": {
       "born": [],
-      "modified": []
+      "modified": [],
+      "changed": [],
+      "accessed": []
     },
     "key": {
       "born": [],
-      "modified": []
+      "modified": [],
+      "changed": [],
+      "accessed": []
     }
   }
 }
 
 
 def start():
-  print()   # I like formatting, dont judge me
+  system["start_time"] = time.time()
   handle_args()
   handle_logs()
 
-  manual_trigger = system["manual_trigger"]
+  print()   # I like formatting, dont judge me
+  manual_trigger = system["args"].command[0] == "man" or system["args"].command[0] == "manual"
   if manual_trigger:
     input("Press enter when ready to scan...")
+    system["end_time"] = time.time()
   else:
     execute_subprocess()
 
@@ -107,33 +123,38 @@ def start():
 
 
 def handle_args():
-  handle_no_args()
-  handle_help_arg()
-  handle_manual_arg()
-  handle_command_arg()
+  parser = argparse.ArgumentParser(
+    description="Show disk changes caused by an operation."
+  )
+  parser.add_argument(
+    "command",
+    type=str,
+    nargs='+',
+    help='Command to execute. Alternatively, keyword "manual"'
+  )
+  parser.add_argument(
+    "-b", "--no-born",
+    action="store_true",
+    help="Toggles including files born during the operation.\nDefault On."
+  )
+  parser.add_argument(
+    "-m", "--no-modified",
+    action="store_true",
+    help="Toggles including files modified during the operation.\nDefault On."
+  )
+  parser.add_argument(
+    "-c", "--no-changed",
+    action="store_true",
+    help="Toggles including files changed during the operation.\nDefault Off."
+  )
+  parser.add_argument(
+    "-a", "--no-accessed",
+    action="store_true",
+    help="Toggles including files accessed during the operation.\nDefault Off."
+  )
+  args = parser.parse_args()
 
-
-def handle_no_args():
-  any_args = len(sys.argv) > 1
-  if not any_args:
-    print(f"\nUsage: {sys.argv[0]} <command>\n")
-    sys.exit(1)
-
-
-def handle_help_arg():
-  first_arg_is_help = sys.argv[1] == "-h" or sys.argv[1] == "--help"
-  if first_arg_is_help:
-    print(f"\nUsage: {sys.argv[0]} <command>\n")
-    sys.exit(1)
-
-
-def handle_manual_arg():
-  manual_trigger = False
-  first_arg_is_manual = sys.argv[1].lower() == "manual"
-  first_arg_is_man = sys.argv[1].lower() == "man"
-  if first_arg_is_man or first_arg_is_manual:
-    manual_trigger = True
-  system["manual_trigger"] = manual_trigger
+  system["args"] = args
 
 
 def handle_logs():
@@ -155,7 +176,7 @@ def set_log_path():
 
 
 def get_command_as_filename():
-  command = system["command_to_execute"]
+  command = system["args"].command
   command_as_string = ' '.join(command)
   command_as_filename = command_as_string.lower().replace(" ", "_").replace("/", "_")
 
@@ -163,11 +184,11 @@ def get_command_as_filename():
 
 
 def set_log_path_using_command(command_as_filename):
-  log_path = os.path.join(
+  LOG_PATH = os.path.join(
     config["log_dir"],
     f"{command_as_filename}.log"
   )
-  system["log_path"] = log_path
+  system["log_path"] = LOG_PATH
 
 
 def set_log_path_using_time():
@@ -179,20 +200,15 @@ def set_log_path_using_time():
   system["log_path"] = log_path
 
 
-def handle_command_arg():
-  command_to_execute = []
-  manual_trigger = system["manual_trigger"]
-  if not manual_trigger:
-    command_to_execute = sys.argv[1:]
-  system["command_to_execute"] = command_to_execute
-
-
 def execute_subprocess():
-  command = system["command_to_execute"]
+  command = system["args"].command
   try:
     subprocess.run(command, check=True)
   except subprocess.CalledProcessError as e:
-    print(f"Subprocess failed with exit code: {e.returncode}")
+    red = "\033[38;5;160m"
+    white = "\033[0m"
+    print(f"\n{red}Subprocess failed with exit code:{white} {e.returncode}\n")
+  system["end_time"] = time.time()
 
 
 def set_uncategorized_files():
@@ -204,37 +220,49 @@ def set_uncategorized_files():
 
 def categorize_uncategorized_files():
   output_num_of_uncategorized_files()
-  set_log_files()
   set_ignored_files()
-  set_unimportant_files()
-  set_notable_files()
   set_key_files()
+  set_log_files()
+  set_notable_files()
+  set_unimportant_files()
 
 
 def output_categorized_files():
   any_ignored_files = (
     len(system["categorized_files"]["ignored"]["born"])
     + len(system["categorized_files"]["ignored"]["modified"])
+    + len(system["categorized_files"]["ignored"]["changed"])
+    + len(system["categorized_files"]["ignored"]["accessed"])
   ) > 0
   any_unimportant_files = (
     len(system["categorized_files"]["unimportant"]["born"])
     + len(system["categorized_files"]["unimportant"]["modified"])
+    + len(system["categorized_files"]["unimportant"]["changed"])
+    + len(system["categorized_files"]["unimportant"]["accessed"])
   ) > 0
   any_notable_files = (
     len(system["categorized_files"]["notable"]["born"])
     + len(system["categorized_files"]["notable"]["modified"])
+    + len(system["categorized_files"]["notable"]["changed"])
+    + len(system["categorized_files"]["notable"]["accessed"])
   ) > 0
   any_key_files = (
     len(system["categorized_files"]["key"]["born"])
     + len(system["categorized_files"]["key"]["modified"])
+    + len(system["categorized_files"]["key"]["changed"])
+    + len(system["categorized_files"]["key"]["accessed"])
   ) > 0
   any_log_files = (
     len(system["categorized_files"]["logs"]["born"])
     + len(system["categorized_files"]["logs"]["modified"])
+    + len(system["categorized_files"]["logs"]["changed"])
+    + len(system["categorized_files"]["logs"]["accessed"])
   ) > 0
   any_uncategorized_files = (
   len(system["uncategorized_files"]["born"])
   + len(system["uncategorized_files"]["modified"])
+  + len(system["uncategorized_files"]["changed"])
+  + len(system["uncategorized_files"]["accessed"])
   ) > 0
 
   truncate_file(system["log_path"])
@@ -287,30 +315,73 @@ def get_files_except_ignored(dirs):
 
 
 def get_file_paths_touched_after_start(file_paths):
+  start_time = system["start_time"]
+  end_time = system["end_time"]
+  ignored_files = config["file_categories"]["ignored"]
+
   files_touched = {
     "born": [],
-    "modified": []
+    "modified": [],
+    "changed": [],
+    "accessed": []
   }
+  processed = []
 
-  start_time = system["start_time"]
   for file_path in file_paths:
     if os.path.exists(file_path):
-      birth_time = os.stat(file_path).st_ctime
-      mod_time = os.stat(file_path).st_mtime
-      if birth_time > start_time:
-        if file_path not in config["file_categories"]["ignored"]:
+      stat = os.stat(file_path)
+      birth_time = stat.st_ctime
+      modify_time = stat.st_mtime
+      change_time = stat.st_ctime
+      access_time = stat.st_atime
+
+      if file_path not in ignored_files:
+        if (
+          not system["args"].no_born
+          and birth_time > start_time
+          and birth_time < end_time
+        ):
           files_touched["born"].append(file_path)
-      if mod_time > start_time and file_path not in files_touched["born"]:
-        if file_path not in config["file_categories"]["ignored"]:
+          processed.append(file_path)
+        if (
+          not system["args"].no_modified
+          and modify_time > start_time
+          and modify_time < end_time
+          and file_path not in processed
+        ):
           files_touched["modified"].append(file_path)
+          processed.append(file_path)
+        if (
+          not system["args"].no_changed
+          and change_time > start_time
+          and modify_time < end_time
+          and file_path not in processed
+        ):
+          files_touched["changed"].append(file_path)
+          processed.append(file_path)
+        if (
+          not system["args"].no_accessed
+          and access_time > start_time
+          and modify_time < end_time
+          and file_path not in processed
+        ):
+          files_touched["accessed"].append(file_path)
+          processed.append(file_path)
 
   return files_touched
 
 
 def output_num_of_uncategorized_files():
-  birth_file_count = len(system["uncategorized_files"]["born"])
+  born_file_count = len(system["uncategorized_files"]["born"])
   modified_file_count = len(system["uncategorized_files"]["modified"])
-  files_to_categorize = birth_file_count + modified_file_count
+  changed_file_count = len(system["uncategorized_files"]["changed"])
+  accessed_file_count = len(system["uncategorized_files"]["accessed"])
+  files_to_categorize = (
+    born_file_count
+    + modified_file_count
+    + changed_file_count
+    + accessed_file_count
+  )
   files_to_categorize_formatted = f"{files_to_categorize:,}"
 
   print(f"\nCategorizing files: {files_to_categorize_formatted}...")
@@ -319,31 +390,15 @@ def output_num_of_uncategorized_files():
 def set_log_files():
   set_born_log_files()
   set_modified_log_files()
-
-
-def set_born_log_files():
-  uncategorized_born_files = system["uncategorized_files"]["born"]
-  born_logs = system["categorized_files"]["logs"]["born"]
-  for file_path in uncategorized_born_files.copy():
-    is_log_file = "log" in file_path
-    if is_log_file:
-      born_logs.append(file_path)
-      uncategorized_born_files.remove(file_path)
-
-
-def set_modified_log_files():
-  uncategorized_modified_files = system["uncategorized_files"]["modified"]
-  modified_logs = system["categorized_files"]["logs"]["modified"]
-  for file_path in uncategorized_modified_files.copy():
-    is_log_file = "log" in file_path
-    if is_log_file:
-      modified_logs.append(file_path)
-      uncategorized_modified_files.remove(file_path)
+  set_changed_log_files()
+  set_accessed_log_files()
 
 
 def set_ignored_files():
   set_born_ignored_files()
   set_modified_ignored_files()
+  set_changed_ignored_files()
+  set_accessed_ignored_files()
 
 
 def set_born_ignored_files():
@@ -358,9 +413,23 @@ def set_modified_ignored_files():
   set_some_modified_files(ignored_modified_files, ignored_dirs)
 
 
+def set_changed_ignored_files():
+  ignored_changed_files = system["categorized_files"]["ignored"]["changed"]
+  ignored_dirs = config["dir_categories"]["ignored"]
+  set_some_changed_files(ignored_changed_files, ignored_dirs)
+
+
+def set_accessed_ignored_files():
+  ignored_accessed_files = system["categorized_files"]["ignored"]["accessed"]
+  ignored_dirs = config["dir_categories"]["ignored"]
+  set_some_accessed_files(ignored_accessed_files, ignored_dirs)
+
+
 def set_unimportant_files():
   set_born_unimportant_files()
   set_modified_unimportant_files()
+  set_changed_unimportant_files()
+  set_accessed_unimportant_files()
 
 
 def set_born_unimportant_files():
@@ -375,9 +444,58 @@ def set_modified_unimportant_files():
   set_some_modified_files(unimportant_modified_files, unimportant_dirs)
 
 
+def set_changed_unimportant_files():
+  unimportant_changed_files = system["categorized_files"]["unimportant"]["changed"]
+  unimportant_dirs = config["dir_categories"]["unimportant"]
+  set_some_changed_files(unimportant_changed_files, unimportant_dirs)
+
+
+def set_accessed_unimportant_files():
+  unimportant_accessed_files = system["categorized_files"]["unimportant"]["accessed"]
+  unimportant_dirs = config["dir_categories"]["unimportant"]
+  set_some_accessed_files(unimportant_accessed_files, unimportant_dirs)
+
+
+def set_born_log_files():
+  uncategorized_born_files = system["uncategorized_files"]["born"]
+  born_logs = system["categorized_files"]["logs"]["born"]
+  for file_path in uncategorized_born_files.copy():
+    if is_log_file(file_path):
+      born_logs.append(file_path)
+      uncategorized_born_files.remove(file_path)
+
+
+def set_modified_log_files():
+  uncategorized_modified_files = system["uncategorized_files"]["modified"]
+  modified_logs = system["categorized_files"]["logs"]["modified"]
+  for file_path in uncategorized_modified_files.copy():
+    if is_log_file(file_path):
+      modified_logs.append(file_path)
+      uncategorized_modified_files.remove(file_path)
+
+def set_changed_log_files():
+  uncategorized_changed_files = system["uncategorized_files"]["changed"]
+  changed_logs = system["categorized_files"]["logs"]["changed"]
+  for file_path in uncategorized_changed_files.copy():
+    if is_log_file(file_path):
+      changed_logs.append(file_path)
+      uncategorized_changed_files.remove(file_path)
+
+def set_accessed_log_files():
+  uncategorized_accessed_files = system["uncategorized_files"]["accessed"]
+  accessed_logs = system["categorized_files"]["logs"]["accessed"]
+  for file_path in uncategorized_accessed_files.copy():
+    if is_log_file(file_path):
+      accessed_logs.append(file_path)
+      uncategorized_accessed_files.remove(file_path)
+
+
 def set_notable_files():
   set_born_notable_files()
   set_modified_notable_files()
+  set_changed_notable_files()
+  set_accessed_notable_files()
+
 
 def set_born_notable_files():
   notable_born_files = system["categorized_files"]["notable"]["born"]
@@ -391,9 +509,23 @@ def set_modified_notable_files():
   set_some_modified_files(notable_modified_files, notable_dirs)
 
 
+def set_changed_notable_files():
+  notable_changed_files = system["categorized_files"]["notable"]["changed"]
+  notable_dirs = config["dir_categories"]["notable"]
+  set_some_changed_files(notable_changed_files, notable_dirs)
+
+
+def set_accessed_notable_files():
+  notable_accessed_files = system["categorized_files"]["notable"]["accessed"]
+  notable_dirs = config["dir_categories"]["notable"]
+  set_some_accessed_files(notable_accessed_files, notable_dirs)
+
+
 def set_key_files():
   set_born_key_files()
   set_modified_key_files()
+  set_changed_key_files()
+  set_accessed_key_files()
 
 
 def set_born_key_files():
@@ -408,6 +540,18 @@ def set_modified_key_files():
   set_some_modified_files(key_modified_files, key_dirs)
 
 
+def set_changed_key_files():
+  key_changed_files = system["categorized_files"]["key"]["changed"]
+  key_dirs = config["dir_categories"]["key"]
+  set_some_changed_files(key_changed_files, key_dirs)
+
+
+def set_accessed_key_files():
+  key_accessed_files = system["categorized_files"]["key"]["accessed"]
+  key_dirs = config["dir_categories"]["key"]
+  set_some_accessed_files(key_accessed_files, key_dirs)
+
+
 def set_some_born_files(some_born_files, some_criteria_dirs):
   uncategorized_born_files = system["uncategorized_files"]["born"]
   set_some_files(uncategorized_born_files, some_born_files, some_criteria_dirs)
@@ -418,17 +562,27 @@ def set_some_modified_files(some_modified_files, some_criteria_dirs):
   set_some_files(uncategorized_modified_files, some_modified_files, some_criteria_dirs)
 
 
+def set_some_changed_files(some_changed_files, some_criteria_dirs):
+  uncategorized_changed_files = system["uncategorized_files"]["changed"]
+  set_some_files(uncategorized_changed_files, some_changed_files, some_criteria_dirs)
+
+
+def set_some_accessed_files(some_accessed_files, some_criteria_dirs):
+  uncategorized_accessed_files = system["uncategorized_files"]["accessed"]
+  set_some_files(uncategorized_accessed_files, some_accessed_files, some_criteria_dirs)
+
+
 def set_some_files(some_uncategorized_files, some_files, some_criteria_dirs):
-  for file_path in some_uncategorized_files.copy():
-    for directory in some_criteria_dirs:
-      is_unimportant_file = is_file_of_directory(file_path, directory)
-      if is_unimportant_file:
+  for directory in some_criteria_dirs:
+    for file_path in some_uncategorized_files.copy():
+      is_some_file = is_file_of_directory(file_path, directory)
+      if is_some_file:
         some_files.append(file_path)
         # TODO: This throws sometimes, not sure why
-        try:
-          some_uncategorized_files.remove(file_path)
-        except ValueError:
-          pass
+        # try:
+        some_uncategorized_files.remove(file_path)
+        # except ValueError:
+        #   pass
 
 
 def output_ignored_files():
@@ -479,6 +633,8 @@ def output_some_files(tag, some_categorized_files, color):
   append_to_file(system["log_path"], f"\n_____{tag}_____")
   output_some_born_files(some_categorized_files["born"], color)
   output_some_modified_files(some_categorized_files["modified"], color)
+  output_some_changed_files(some_categorized_files["changed"], color)
+  output_some_accessed_files(some_categorized_files["accessed"], color)
 
 
 def output_some_born_files(some_categorized_born_files, color):
@@ -493,6 +649,20 @@ def output_some_modified_files(some_categorized_modified_files, color):
   for file_path in some_categorized_modified_files:
     print(f"  Modified: {color}{file_path}{white}")
     append_to_file(system["log_path"], f"  Modified: {file_path}")
+
+
+def output_some_changed_files(some_categorized_changed_files, color):
+  white = "\033[0m"
+  for file_path in some_categorized_changed_files:
+    print(f"   Changed: {color}{file_path}{white}")
+    append_to_file(system["log_path"], f"   Changed: {file_path}")
+
+
+def output_some_accessed_files(some_categorized_accessed_files, color):
+  white = "\033[0m"
+  for file_path in some_categorized_accessed_files:
+    print(f"  Accessed: {color}{file_path}{white}")
+    append_to_file(system["log_path"], f"  Accessed: {file_path}")
 
 
 def truncate_file(file_path):
@@ -521,4 +691,17 @@ def is_file_of_directory(file_path, directory):
     return False
 
 
+def is_log_file(file_path):
+  directory = os.path.dirname(file_path)
+  file_name = os.path.basename(file_path)
+  return (
+    "logs" in directory
+    or (
+      "log" in file_name
+      and "login" not in file_name
+    )
+  )
+
+
 start()
+
