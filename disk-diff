@@ -15,6 +15,8 @@ config = {
   },
   "dir_categories": {
     "ignored": [
+      # These directories are ignored because they can cause permissions issues
+      "/mnt",
       # These directories are ignored because they're very large, and typically irrelevant
       "/proc",            # ~611k
       "/sys",             # ~106k
