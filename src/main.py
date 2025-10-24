@@ -5,7 +5,8 @@ import os
 import subprocess
 import sys
 import time
-import termios, tty
+import termios
+import tty
 
 #######################################################
 ###### Configuration & Global Vars
@@ -128,7 +129,8 @@ def start():
   set_dirs_to_check()
 
   manual_trigger = system["args"].command[0] == "man" or system["args"].command[0] == "manual"
-  system["start_time"] = (time.time() - 0.02)   # This accounts for a strange bug where stat times can appear slightly before the start time
+  # This accounts for a strange bug where stat times can appear slightly before the start time
+  system["start_time"] = time.time() - 0.02
   if manual_trigger:
     overwrite_last_line("Press enter when ready to scan...")
     wait_for_keypress()
@@ -484,12 +486,18 @@ def output_categorized_files():
 
   truncate_file(system["log_path"])   # TODO: Probably we shouldn't just truncate the file every time
 
-  output_ignored_files() if any_ignored_files else None
-  output_unimportant_files() if any_unimportant_files else None
-  output_notable_files() if any_notable_files else None
-  output_key_files() if any_key_files else None
-  output_log_files() if any_log_files else None
-  output_uncategorized_files() if any_uncategorized_files else None
+  if any_ignored_files:
+    output_ignored_files()
+  if any_unimportant_files:
+    output_unimportant_files()
+  if any_notable_files:
+    output_notable_files()
+  if any_key_files:
+    output_key_files()
+  if any_log_files:
+    output_log_files()
+  if any_uncategorized_files:
+    output_uncategorized_files()
   print()
 
 
@@ -589,14 +597,11 @@ def set_uncategorized_files(dirs):
       file_path = os.path.join(directory, file_name)
       if dodge_keyword_is_in_file_path(file_path):
         continue
-      
       if os.path.islink(file_path):
         continue  # Ignore symlinks for now
-      
       if os.path.isdir(file_path):
         if file_path not in config["dir_categories"]["ignored"]:
           set_uncategorized_files([file_path])
-      
       if os.path.isfile(file_path):
         if is_valid_born_file(file_path):
           system["uncategorized_files"]["born"].append(file_path)
@@ -694,8 +699,7 @@ def overwrite_last_line(content):
 def argparse_is_dir(directory):
   if os.path.isdir(directory):
     return directory
-  else:
-    raise argparse.ArgumentTypeError(f"Not a valid directory: {directory}")
+  raise argparse.ArgumentTypeError(f"Not a valid directory: {directory}")
 
 
 def is_subdirectory(potential_sub_dir, dir2):
@@ -710,8 +714,7 @@ def is_file_of_directory(file_path, directory):
   is_indirect_file_of_dir = is_subdirectory(os.path.dirname(file_path), directory)
   if is_direct_file_of_dir or is_indirect_file_of_dir:
     return True
-  else:
-    return False
+  return False
 
 
 def is_log_file(file_path):
@@ -725,6 +728,7 @@ def is_log_file(file_path):
     )
   )
 
+
 def is_valid_born_file(file_path):
   start_time = system["start_time"]
   end_time = system["end_time"]
@@ -732,8 +736,7 @@ def is_valid_born_file(file_path):
 
   return (
     not system["args"].no_born
-    and birth_time > start_time
-    and birth_time < end_time
+    and start_time < birth_time < end_time
   )
 
 
@@ -744,8 +747,7 @@ def is_valid_modified_file(file_path):
 
   return (
     not system["args"].no_modified
-    and modified_time > start_time
-    and modified_time < end_time
+    and end_time > modified_time > start_time
   )
 
 
@@ -753,11 +755,9 @@ def is_valid_changed_file(file_path):
   start_time = system["start_time"]
   end_time = system["end_time"]
   changed_time = os.stat(file_path).st_ctime
-  
   return (
     not system["args"].no_changed
-    and changed_time > start_time
-    and changed_time < end_time
+    and end_time > changed_time > start_time
   )
 
 
@@ -768,8 +768,7 @@ def is_valid_accessed_file(file_path):
 
   return (
     not system["args"].no_accessed
-    and access_time > start_time
-    and access_time < end_time
+    and end_time > access_time > start_time
   )
 
 #######################################################
