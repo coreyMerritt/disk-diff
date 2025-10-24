@@ -30,10 +30,11 @@ if [[ ! -d .venv ]]; then
 fi
 if [[ -f .venv/bin/activate ]]; then
   source .venv/bin/activate
+  pip install --upgrade pip setuptools wheel
 fi
 if [[ ! $venv_existed -eq 1 ]]; then
   pip install .
 fi
 
-sudo python3 ./src/main.py $@
+python3 ./src/main.py $@
 
