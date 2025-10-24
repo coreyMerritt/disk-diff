@@ -3,10 +3,16 @@
 import argparse
 import os
 import subprocess
+import sys
 import time
+import termios, tty
+
+#######################################################
+###### Configuration & Global Vars
+#######################################################
 
 config = {
-  "log_dir": "/tmp/disk_monitor",
+  "log_dir": "/tmp/disk-diff",
   "dirs_to_check": ["/"],
   "file_categories": {
     "ignored": [
@@ -24,7 +30,13 @@ config = {
       # These directories are ignored because they're cluttery
       "/root/.vscode-server",
       "/run/docker/runtime-runc",
-      "/run/log/journal"
+      "/run/log/journal",
+      # Lets just ignore everything in unimportant for now
+      "/dev",
+      "/run",
+      "/usr/lib/.build-id",
+      "/var/cache",
+      "/var/run"
     ],
     "unimportant": [
       "/dev",
@@ -35,6 +47,7 @@ config = {
     ],
     "notable": [
       "/lib",
+      "/tmp",
       "/usr/include",
       "/usr/lib",
       "/usr/share",
@@ -64,6 +77,7 @@ system = {
   "log_path": str,
   "get_files_first_call": True,
   "files_examined_count": int,
+  "dirs_to_check": [],
   "uncategorized_files": {
     "born": [],
     "modified": [],
@@ -104,25 +118,86 @@ system = {
   }
 }
 
+#######################################################
+###### Orchestration
+#######################################################
 
 def start():
-  system["start_time"] = time.time()
   handle_args()
   handle_logs()
+  set_dirs_to_check()
 
-  print()   # I like formatting, dont judge me
   manual_trigger = system["args"].command[0] == "man" or system["args"].command[0] == "manual"
+  system["start_time"] = (time.time() - 0.02)   # This accounts for a strange bug where stat times can appear slightly before the start time
   if manual_trigger:
-    input("Press enter when ready to scan...")
-    system["end_time"] = time.time()
+    overwrite_last_line("Press enter when ready to scan...")
+    wait_for_keypress()
   else:
     execute_subprocess()
+  system["end_time"] = time.time()
 
-  set_uncategorized_files()
+  index_files()
+  output_num_of_uncategorized_files()
   categorize_uncategorized_files()
   output_categorized_files()
-  output_stats()
 
+
+def handle_logs():
+  make_log_dir()
+  set_log_path()
+
+
+def categorize_uncategorized_files():
+  set_ignored_files()
+  set_key_files()
+  set_log_files()
+  set_notable_files()
+  set_unimportant_files()
+
+
+def set_log_files():
+  set_born_log_files()
+  set_modified_log_files()
+  set_changed_log_files()
+  set_accessed_log_files()
+
+
+def set_ignored_files():
+  set_born_ignored_files()
+  set_modified_ignored_files()
+  set_changed_ignored_files()
+  set_accessed_ignored_files()
+
+
+def set_unimportant_files():
+  set_born_unimportant_files()
+  set_modified_unimportant_files()
+  set_changed_unimportant_files()
+  set_accessed_unimportant_files()
+
+
+def set_notable_files():
+  set_born_notable_files()
+  set_modified_notable_files()
+  set_changed_notable_files()
+  set_accessed_notable_files()
+
+
+def set_key_files():
+  set_born_key_files()
+  set_modified_key_files()
+  set_changed_key_files()
+  set_accessed_key_files()
+
+
+def index_files():
+  overwrite_last_line("Indexing files...")
+  dirs_to_check = system["dirs_to_check"]
+  set_uncategorized_files(dirs_to_check)
+
+#######################################################
+###### Pre-Execution
+#######################################################
 
 def handle_args():
   parser = argparse.ArgumentParser(
@@ -154,19 +229,56 @@ def handle_args():
     action="store_true",
     help="Toggles including files accessed during the operation.\nDefault Off."
   )
+  parser.add_argument(
+    "-d", "--dir",
+    action="append",
+    type=argparse_is_dir,
+    help="Adds a directory to check -- Overwrites dirs in config.\nDefault is what's in config."
+  )
+  parser.add_argument(
+    "--dodge",
+    action="append",
+    type=str,
+    help="Adds a keyword to dodge -- Will skip any file path with {value} in it."
+  )
   args = parser.parse_args()
-
   system["args"] = args
 
+#######################################################
+###### Execution
+#######################################################
 
-def handle_logs():
-  make_log_dir()
-  set_log_path()
-
+def execute_subprocess():
+  command = system["args"].command
+  try:
+    subprocess.run(command, check=True)
+  except subprocess.CalledProcessError as e:
+    red = "\033[38;5;160m"
+    white = "\033[0m"
+    print(f"\n{red}Subprocess failed with exit code:{white} {e.returncode}\n")
 
 def make_log_dir():
   log_dir = config["log_dir"]
   os.makedirs(log_dir, exist_ok=True)
+
+def wait_for_keypress():
+  fd = sys.stdin.fileno()
+  old = termios.tcgetattr(fd)
+  try:
+    tty.setraw(fd)
+    sys.stdin.read(1)
+  finally:
+    termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+#######################################################
+###### Data Manipulation
+#######################################################
+
+def set_dirs_to_check():
+  if system["args"].dir is not None:
+    system["dirs_to_check"] = system["args"].dir
+  else:
+    system["dirs_to_check"] = config["dirs_to_check"]
 
 
 def set_log_path():
@@ -175,14 +287,6 @@ def set_log_path():
     set_log_path_using_command(command_as_filename)
   else:
     set_log_path_using_time()
-
-
-def get_command_as_filename():
-  command = system["args"].command
-  command_as_string = ' '.join(command)
-  command_as_filename = command_as_string.lower().replace(" ", "_").replace("/", "_")
-
-  return command_as_filename
 
 
 def set_log_path_using_command(command_as_filename):
@@ -200,207 +304,6 @@ def set_log_path_using_time():
     f"manual-{current_time}.log"
   )
   system["log_path"] = log_path
-
-
-def execute_subprocess():
-  command = system["args"].command
-  try:
-    subprocess.run(command, check=True)
-  except subprocess.CalledProcessError as e:
-    red = "\033[38;5;160m"
-    white = "\033[0m"
-    print(f"\n{red}Subprocess failed with exit code:{white} {e.returncode}\n")
-  system["end_time"] = time.time()
-
-
-def set_uncategorized_files():
-  dirs_to_check = config["dirs_to_check"]
-  file_paths = get_files_except_ignored(dirs_to_check)
-  uncategorized_files = get_file_paths_touched_after_start(file_paths)
-  system["uncategorized_files"] = uncategorized_files
-
-
-def categorize_uncategorized_files():
-  output_num_of_uncategorized_files()
-  set_ignored_files()
-  set_key_files()
-  set_log_files()
-  set_notable_files()
-  set_unimportant_files()
-
-
-def output_categorized_files():
-  any_ignored_files = (
-    len(system["categorized_files"]["ignored"]["born"])
-    + len(system["categorized_files"]["ignored"]["modified"])
-    + len(system["categorized_files"]["ignored"]["changed"])
-    + len(system["categorized_files"]["ignored"]["accessed"])
-  ) > 0
-  any_unimportant_files = (
-    len(system["categorized_files"]["unimportant"]["born"])
-    + len(system["categorized_files"]["unimportant"]["modified"])
-    + len(system["categorized_files"]["unimportant"]["changed"])
-    + len(system["categorized_files"]["unimportant"]["accessed"])
-  ) > 0
-  any_notable_files = (
-    len(system["categorized_files"]["notable"]["born"])
-    + len(system["categorized_files"]["notable"]["modified"])
-    + len(system["categorized_files"]["notable"]["changed"])
-    + len(system["categorized_files"]["notable"]["accessed"])
-  ) > 0
-  any_key_files = (
-    len(system["categorized_files"]["key"]["born"])
-    + len(system["categorized_files"]["key"]["modified"])
-    + len(system["categorized_files"]["key"]["changed"])
-    + len(system["categorized_files"]["key"]["accessed"])
-  ) > 0
-  any_log_files = (
-    len(system["categorized_files"]["logs"]["born"])
-    + len(system["categorized_files"]["logs"]["modified"])
-    + len(system["categorized_files"]["logs"]["changed"])
-    + len(system["categorized_files"]["logs"]["accessed"])
-  ) > 0
-  any_uncategorized_files = (
-  len(system["uncategorized_files"]["born"])
-  + len(system["uncategorized_files"]["modified"])
-  + len(system["uncategorized_files"]["changed"])
-  + len(system["uncategorized_files"]["accessed"])
-  ) > 0
-
-  truncate_file(system["log_path"])
-
-  if any_ignored_files:
-    output_ignored_files()
-  if any_unimportant_files:
-    output_unimportant_files()
-  if any_notable_files:
-    output_notable_files()
-  if any_key_files:
-    output_key_files()
-  if any_log_files:
-    output_log_files()
-  if any_uncategorized_files:
-    output_uncategorized_files()
-  print()
-
-
-def output_stats():
-  print()
-
-  files_examined_count = system["files_examined_count"]
-  print(f"Examined files: {files_examined_count}")
-
-
-def get_files_except_ignored(dirs):
-  first_call = system["get_files_first_call"]
-  system["get_files_first_call"] = False
-
-  if first_call:
-    print(f"Checking directories:\n{dirs}\n...")
-
-  file_paths = []
-  for directory in dirs:
-    for file_name in os.listdir(directory):
-      file_path = os.path.join(directory, file_name)
-      if os.path.islink(file_path):
-        pass # Ignore symlinks
-      elif os.path.isdir(file_path):
-        if file_path not in config["dir_categories"]["ignored"]:
-          file_paths.extend(get_files_except_ignored([file_path]))
-      elif os.path.isfile(file_path):
-        file_paths.append(file_path)
-
-  if first_call:
-    system["files_examined_count"] = f"{len(file_paths):,}"
-
-  return file_paths
-
-
-def get_file_paths_touched_after_start(file_paths):
-  start_time = system["start_time"]
-  end_time = system["end_time"]
-  ignored_files = config["file_categories"]["ignored"]
-
-  files_touched = {
-    "born": [],
-    "modified": [],
-    "changed": [],
-    "accessed": []
-  }
-  processed = []
-
-  for file_path in file_paths:
-    if os.path.exists(file_path):
-      stat = os.stat(file_path)
-      birth_time = stat.st_ctime
-      modify_time = stat.st_mtime
-      change_time = stat.st_ctime
-      access_time = stat.st_atime
-
-      if file_path not in ignored_files:
-        if (
-          not system["args"].no_born
-          and birth_time > start_time
-          and birth_time < end_time
-        ):
-          files_touched["born"].append(file_path)
-          processed.append(file_path)
-        if (
-          not system["args"].no_modified
-          and modify_time > start_time
-          and modify_time < end_time
-          and file_path not in processed
-        ):
-          files_touched["modified"].append(file_path)
-          processed.append(file_path)
-        if (
-          not system["args"].no_changed
-          and change_time > start_time
-          and modify_time < end_time
-          and file_path not in processed
-        ):
-          files_touched["changed"].append(file_path)
-          processed.append(file_path)
-        if (
-          not system["args"].no_accessed
-          and access_time > start_time
-          and modify_time < end_time
-          and file_path not in processed
-        ):
-          files_touched["accessed"].append(file_path)
-          processed.append(file_path)
-
-  return files_touched
-
-
-def output_num_of_uncategorized_files():
-  born_file_count = len(system["uncategorized_files"]["born"])
-  modified_file_count = len(system["uncategorized_files"]["modified"])
-  changed_file_count = len(system["uncategorized_files"]["changed"])
-  accessed_file_count = len(system["uncategorized_files"]["accessed"])
-  files_to_categorize = (
-    born_file_count
-    + modified_file_count
-    + changed_file_count
-    + accessed_file_count
-  )
-  files_to_categorize_formatted = f"{files_to_categorize:,}"
-
-  print(f"\nCategorizing files: {files_to_categorize_formatted}...")
-
-
-def set_log_files():
-  set_born_log_files()
-  set_modified_log_files()
-  set_changed_log_files()
-  set_accessed_log_files()
-
-
-def set_ignored_files():
-  set_born_ignored_files()
-  set_modified_ignored_files()
-  set_changed_ignored_files()
-  set_accessed_ignored_files()
 
 
 def set_born_ignored_files():
@@ -425,13 +328,6 @@ def set_accessed_ignored_files():
   ignored_accessed_files = system["categorized_files"]["ignored"]["accessed"]
   ignored_dirs = config["dir_categories"]["ignored"]
   set_some_accessed_files(ignored_accessed_files, ignored_dirs)
-
-
-def set_unimportant_files():
-  set_born_unimportant_files()
-  set_modified_unimportant_files()
-  set_changed_unimportant_files()
-  set_accessed_unimportant_files()
 
 
 def set_born_unimportant_files():
@@ -492,13 +388,6 @@ def set_accessed_log_files():
       uncategorized_accessed_files.remove(file_path)
 
 
-def set_notable_files():
-  set_born_notable_files()
-  set_modified_notable_files()
-  set_changed_notable_files()
-  set_accessed_notable_files()
-
-
 def set_born_notable_files():
   notable_born_files = system["categorized_files"]["notable"]["born"]
   notable_dirs = config["dir_categories"]["notable"]
@@ -521,13 +410,6 @@ def set_accessed_notable_files():
   notable_accessed_files = system["categorized_files"]["notable"]["accessed"]
   notable_dirs = config["dir_categories"]["notable"]
   set_some_accessed_files(notable_accessed_files, notable_dirs)
-
-
-def set_key_files():
-  set_born_key_files()
-  set_modified_key_files()
-  set_changed_key_files()
-  set_accessed_key_files()
 
 
 def set_born_key_files():
@@ -580,11 +462,35 @@ def set_some_files(some_uncategorized_files, some_files, some_criteria_dirs):
       is_some_file = is_file_of_directory(file_path, directory)
       if is_some_file:
         some_files.append(file_path)
-        # TODO: This throws sometimes, not sure why
-        # try:
         some_uncategorized_files.remove(file_path)
-        # except ValueError:
-        #   pass
+
+#######################################################
+###### Output
+#######################################################
+
+def output_num_of_uncategorized_files():
+  file_count = len(get_all_uncategorized_files())
+  files_to_categorize_formatted = f"{file_count:,}"
+  overwrite_last_line(f"Categorized files: {files_to_categorize_formatted}\n")
+
+
+def output_categorized_files():
+  any_ignored_files = len(get_all_ignored_files()) > 0
+  any_unimportant_files = len(get_all_unimportant_files()) > 0
+  any_notable_files = len(get_all_notable_files()) > 0
+  any_key_files = len(get_all_key_files()) > 0
+  any_log_files = len(get_all_log_files()) > 0
+  any_uncategorized_files = len(get_all_uncategorized_files()) > 0
+
+  truncate_file(system["log_path"])   # TODO: Probably we shouldn't just truncate the file every time
+
+  output_ignored_files() if any_ignored_files else None
+  output_unimportant_files() if any_unimportant_files else None
+  output_notable_files() if any_notable_files else None
+  output_key_files() if any_key_files else None
+  output_log_files() if any_log_files else None
+  output_uncategorized_files() if any_uncategorized_files else None
+  print()
 
 
 def output_ignored_files():
@@ -631,7 +537,6 @@ def output_uncategorized_files():
 
 def output_some_files(tag, some_categorized_files, color):
   print(f"\n{tag}:")
-
   append_to_file(system["log_path"], f"\n_____{tag}_____")
   output_some_born_files(some_categorized_files["born"], color)
   output_some_modified_files(some_categorized_files["modified"], color)
@@ -666,6 +571,107 @@ def output_some_accessed_files(some_categorized_accessed_files, color):
     print(f"  Accessed: {color}{file_path}{white}")
     append_to_file(system["log_path"], f"  Accessed: {file_path}")
 
+#######################################################
+###### Low Level Helpers / Utilities
+#######################################################
+
+def get_command_as_filename():
+  command = system["args"].command
+  command_as_string = ' '.join(command)
+  command_as_filename = command_as_string.lower().replace(" ", "_").replace("/", "_")
+
+  return command_as_filename
+
+
+def set_uncategorized_files(dirs):
+  for directory in dirs:
+    for file_name in os.listdir(directory):
+      file_path = os.path.join(directory, file_name)
+      if dodge_keyword_is_in_file_path(file_path):
+        continue
+      
+      if os.path.islink(file_path):
+        continue  # Ignore symlinks for now
+      
+      if os.path.isdir(file_path):
+        if file_path not in config["dir_categories"]["ignored"]:
+          set_uncategorized_files([file_path])
+      
+      if os.path.isfile(file_path):
+        if is_valid_born_file(file_path):
+          system["uncategorized_files"]["born"].append(file_path)
+        elif is_valid_modified_file(file_path):
+          system["uncategorized_files"]["modified"].append(file_path)
+        elif is_valid_changed_file(file_path):
+          system["uncategorized_files"]["changed"].append(file_path)
+        elif is_valid_accessed_file(file_path):
+          system["uncategorized_files"]["accessed"].append(file_path)
+
+
+def dodge_keyword_is_in_file_path(file_path):
+  if system["args"].dodge is not None:
+    for keyword in system["args"].dodge:
+      if keyword in file_path:
+        return True
+  return False
+
+
+def get_all_ignored_files():
+  return (
+    system["categorized_files"]["ignored"]["born"]
+    + system["categorized_files"]["ignored"]["modified"]
+    + system["categorized_files"]["ignored"]["changed"]
+    + system["categorized_files"]["ignored"]["accessed"]
+  )
+
+
+def get_all_unimportant_files():
+  return (
+    system["categorized_files"]["unimportant"]["born"]
+    + system["categorized_files"]["unimportant"]["modified"]
+    + system["categorized_files"]["unimportant"]["changed"]
+    + system["categorized_files"]["unimportant"]["accessed"]
+  )
+
+
+def get_all_notable_files():
+  return (
+    system["categorized_files"]["notable"]["born"]
+    + system["categorized_files"]["notable"]["modified"]
+    + system["categorized_files"]["notable"]["changed"]
+    + system["categorized_files"]["notable"]["accessed"]
+  )
+
+
+def get_all_key_files():
+  return (
+    system["categorized_files"]["key"]["born"]
+    + system["categorized_files"]["key"]["modified"]
+    + system["categorized_files"]["key"]["changed"]
+    + system["categorized_files"]["key"]["accessed"]
+  )
+
+
+def get_all_log_files():
+  return (
+    system["categorized_files"]["logs"]["born"]
+    + system["categorized_files"]["logs"]["modified"]
+    + system["categorized_files"]["logs"]["changed"]
+    + system["categorized_files"]["logs"]["accessed"]
+  )
+
+
+def get_all_uncategorized_files():
+  return (
+    system["uncategorized_files"]["born"]
+    + system["uncategorized_files"]["modified"]
+    + system["uncategorized_files"]["changed"]
+    + system["uncategorized_files"]["accessed"]
+  )
+
+#######################################################
+###### High Level Helpers / Utilities
+#######################################################
 
 def truncate_file(file_path):
   with open(file_path, "w", encoding="utf-8"):
@@ -675,6 +681,21 @@ def truncate_file(file_path):
 def append_to_file(file_path, content):
   with open(file_path, "a", encoding="utf-8") as f:
     f.write(f"{content}\n")
+
+
+def overwrite_last_line(content):
+  print(f"\r\033[K\t{content}", end="", flush=True)
+
+
+#######################################################
+###### Validation
+#######################################################
+
+def argparse_is_dir(directory):
+  if os.path.isdir(directory):
+    return directory
+  else:
+    raise argparse.ArgumentTypeError(f"Not a valid directory: {directory}")
 
 
 def is_subdirectory(potential_sub_dir, dir2):
@@ -704,6 +725,55 @@ def is_log_file(file_path):
     )
   )
 
+def is_valid_born_file(file_path):
+  start_time = system["start_time"]
+  end_time = system["end_time"]
+  birth_time = os.stat(file_path).st_ctime
+
+  return (
+    not system["args"].no_born
+    and birth_time > start_time
+    and birth_time < end_time
+  )
+
+
+def is_valid_modified_file(file_path):
+  start_time = system["start_time"]
+  end_time = system["end_time"]
+  modified_time = os.stat(file_path).st_mtime
+
+  return (
+    not system["args"].no_modified
+    and modified_time > start_time
+    and modified_time < end_time
+  )
+
+
+def is_valid_changed_file(file_path):
+  start_time = system["start_time"]
+  end_time = system["end_time"]
+  changed_time = os.stat(file_path).st_ctime
+  
+  return (
+    not system["args"].no_changed
+    and changed_time > start_time
+    and changed_time < end_time
+  )
+
+
+def is_valid_accessed_file(file_path):
+  start_time = system["start_time"]
+  end_time = system["end_time"]
+  access_time = os.stat(file_path).st_atime
+
+  return (
+    not system["args"].no_accessed
+    and access_time > start_time
+    and access_time < end_time
+  )
+
+#######################################################
+###### Entrypoint
+#######################################################
 
 start()
-

@@ -1,0 +1,27 @@
+[project]
+name = "disk-diff"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  # Linters/Tests
+  "isort",
+  "mypy",
+  "pytest",
+  "ruff",
+]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.isort]
+indent = "  "
+line_length = 120
+
+[tool.mypy]
+explicit_package_bases = true
+mypy_path = "src"
+
