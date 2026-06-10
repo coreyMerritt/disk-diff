@@ -1,0 +1,51 @@
+log_dir: "/tmp/disk-diff"
+dirs_to_check:
+  - "/"
+file_categories:
+  ignored:
+    - "/var/lib/rsyslog/imjournal.state"
+dir_categories:
+  ignored:
+    # These directories are ignored because they can cause permissions issues
+    - "/mnt"
+    # These directories are ignored because they're very large and typically irrelevant
+    - "/proc"            # ~611k
+    - "/sys"             # ~106k
+    - "/var/lib/docker"  # ~1.2m
+    # These directories are ignored because they're cluttery
+    - "/root/.vscode-server"
+    - "/run/docker/runtime-runc"
+    - "/run/log/journal"
+    # Lets just ignore everything in unimportant for now
+    - "/dev"
+    - "/run"
+    - "/usr/lib/.build-id"
+    - "/var/cache"
+    - "/var/run"
+  unimportant:
+    - "/dev"
+    - "/run"
+    - "/usr/lib/.build-id"
+    - "/var/cache"
+    - "/var/run"
+  notable:
+    - "/lib"
+    - "/tmp"
+    - "/usr/include"
+    - "/usr/lib"
+    - "/usr/share"
+    - "/usr/src"
+  key:
+    - "/usr/local"
+    - "/var"
+    - "/root"
+    - "/home"
+    - "/opt"
+    - "/etc"
+    - "/bin"
+    - "/sbin"
+    - "/usr/bin"
+    - "/usr/sbin"
+    - "/usr/local/bin"
+    - "/usr/local/sbin"
+    - "/usr/lib/systemd/system"

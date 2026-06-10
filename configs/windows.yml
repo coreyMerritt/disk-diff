@@ -1,0 +1,10 @@
+log_dir: "./logs"
+dirs_to_check:
+  - "/"
+file_categories:
+  ignored: []
+dir_categories:
+  ignored: []
+  unimportant: []
+  notable: []
+  key: []

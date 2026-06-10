@@ -1,76 +1,16 @@
 #!/usr/bin/env python3
-
 import argparse
 import os
 import subprocess
-import sys
 import time
-import termios
-import tty
+
+import yaml
 
 #######################################################
 ###### Configuration & Global Vars
 #######################################################
 
-config = {
-  "log_dir": "/tmp/disk-diff",
-  "dirs_to_check": ["/"],
-  "file_categories": {
-    "ignored": [
-      "/var/lib/rsyslog/imjournal.state"
-    ]
-  },
-  "dir_categories": {
-    "ignored": [
-      # These directories are ignored because they can cause permissions issues
-      "/mnt",
-      # These directories are ignored because they're very large, and typically irrelevant
-      "/proc",            # ~611k
-      "/sys",             # ~106k
-      "/var/lib/docker",  # ~1.2m
-      # These directories are ignored because they're cluttery
-      "/root/.vscode-server",
-      "/run/docker/runtime-runc",
-      "/run/log/journal",
-      # Lets just ignore everything in unimportant for now
-      "/dev",
-      "/run",
-      "/usr/lib/.build-id",
-      "/var/cache",
-      "/var/run"
-    ],
-    "unimportant": [
-      "/dev",
-      "/run",
-      "/usr/lib/.build-id",
-      "/var/cache",
-      "/var/run"
-    ],
-    "notable": [
-      "/lib",
-      "/tmp",
-      "/usr/include",
-      "/usr/lib",
-      "/usr/share",
-      "/usr/src"
-    ],
-    "key": [
-      "/usr/local",
-      "/var",
-      "/root",
-      "/home",
-      "/opt",
-      "/etc",
-      "/bin",
-      "/sbin",
-      "/usr/bin",
-      "/usr/sbin",
-      "/usr/local/bin",
-      "/usr/local/sbin",
-      "/usr/lib/systemd/system",
-    ]
-  }
-}
+config: dict = {}
 
 system = {
   "start_time": float,
@@ -125,6 +65,7 @@ system = {
 
 def start():
   handle_args()
+  set_config(system["args"].config_path)
   handle_logs()
   set_dirs_to_check()
 
@@ -133,7 +74,7 @@ def start():
   system["start_time"] = time.time() - 0.02
   if manual_trigger:
     overwrite_last_line("Press enter when ready to scan...")
-    wait_for_keypress()
+    input()
   else:
     execute_subprocess()
   system["end_time"] = time.time()
@@ -212,6 +153,12 @@ def handle_args():
     help='Command to execute. Alternatively, keyword "manual"'
   )
   parser.add_argument(
+    "--config-path",
+    type=str,
+    help="Path to configuration file to use. See configs dir for examples.",
+    required=True
+  )
+  parser.add_argument(
     "-b", "--no-born",
     action="store_true",
     help="Toggles including files born during the operation.\nDefault On."
@@ -262,15 +209,6 @@ def execute_subprocess():
 def make_log_dir():
   log_dir = config["log_dir"]
   os.makedirs(log_dir, exist_ok=True)
-
-def wait_for_keypress():
-  fd = sys.stdin.fileno()
-  old = termios.tcgetattr(fd)
-  try:
-    tty.setraw(fd)
-    sys.stdin.read(1)
-  finally:
-    termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 #######################################################
 ###### Data Manipulation
@@ -582,6 +520,12 @@ def output_some_accessed_files(some_categorized_accessed_files, color):
 #######################################################
 ###### Low Level Helpers / Utilities
 #######################################################
+
+def set_config(config_path: str):
+  with open(config_path, "r", encoding="utf-8") as config_file:
+    global config
+    config = yaml.safe_load(config_file)
+
 
 def get_command_as_filename():
   command = system["args"].command
