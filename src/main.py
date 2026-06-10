@@ -5,6 +5,7 @@ import subprocess
 import time
 
 import yaml
+from colorama import just_fix_windows_console
 
 #######################################################
 ###### Configuration & Global Vars
@@ -64,6 +65,7 @@ system = {
 #######################################################
 
 def start():
+  just_fix_windows_console()
   handle_args()
   set_config(system["args"].config_path)
   handle_logs()
@@ -537,24 +539,27 @@ def get_command_as_filename():
 
 def set_uncategorized_files(dirs):
   for directory in dirs:
-    for file_name in os.listdir(directory):
-      file_path = os.path.join(directory, file_name)
-      if dodge_keyword_is_in_file_path(file_path):
-        continue
-      if os.path.islink(file_path):
-        continue  # Ignore symlinks for now
-      if os.path.isdir(file_path):
-        if file_path not in config["dir_categories"]["ignored"]:
-          set_uncategorized_files([file_path])
-      if os.path.isfile(file_path):
-        if is_valid_born_file(file_path):
-          system["uncategorized_files"]["born"].append(file_path)
-        elif is_valid_modified_file(file_path):
-          system["uncategorized_files"]["modified"].append(file_path)
-        elif is_valid_changed_file(file_path):
-          system["uncategorized_files"]["changed"].append(file_path)
-        elif is_valid_accessed_file(file_path):
-          system["uncategorized_files"]["accessed"].append(file_path)
+    try:
+      for file_name in os.listdir(directory):
+        file_path = os.path.join(directory, file_name)
+        if dodge_keyword_is_in_file_path(file_path):
+          continue
+        if os.path.islink(file_path):
+          continue  # Ignore symlinks for now
+        if os.path.isdir(file_path):
+          if file_path not in config["dir_categories"]["ignored"]:
+            set_uncategorized_files([file_path])
+        if os.path.isfile(file_path):
+          if is_valid_born_file(file_path):
+            system["uncategorized_files"]["born"].append(file_path)
+          elif is_valid_modified_file(file_path):
+            system["uncategorized_files"]["modified"].append(file_path)
+          elif is_valid_changed_file(file_path):
+            system["uncategorized_files"]["changed"].append(file_path)
+          elif is_valid_accessed_file(file_path):
+            system["uncategorized_files"]["accessed"].append(file_path)
+    except PermissionError:
+      pass
 
 
 def dodge_keyword_is_in_file_path(file_path):

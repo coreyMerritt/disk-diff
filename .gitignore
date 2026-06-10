@@ -1,8 +1,12 @@
-*.egg-info/
-__pycache__
+# Files
 .env
 .venv
 .vscode
+
+# Dirs
+__pycache__/
 build/
-config/backup/
-config/prod/
+logs/
+
+# Wildcard matching
+*.egg-info/
